@@ -26,6 +26,30 @@ function send(ws, data) {
     if (ws.readyState === WebSocket.OPEN) ws.send(data);
 }
 
+// Coba beberapa client sampai ada yang lolos dari "login required"
+const CLIENTS = ['IOS', 'TV_EMBEDDED', 'ANDROID', 'WEB_EMBEDDED', 'MWEB'];
+
+async function getStream(youtube, id) {
+    let lastErr;
+    for (const client of CLIENTS) {
+        try {
+            console.log(`Coba client: ${client}`);
+            const stream = await youtube.download(id, {
+                type: 'video+audio',
+                quality: '360p',
+                format: 'mp4',
+                client
+            });
+            console.log(`Client berhasil: ${client}`);
+            return stream;
+        } catch (err) {
+            console.log(`Client ${client} gagal: ${err.message}`);
+            lastErr = err;
+        }
+    }
+    throw lastErr;
+}
+
 wss.on('connection', async (ws, req) => {
     const urlParams = new URLSearchParams(req.url.split('?')[1]);
     const query = urlParams.get('q');
@@ -51,11 +75,7 @@ wss.on('connection', async (ws, req) => {
         const title = video.title?.text || String(video.title || query);
         console.log(`Ketemu: ${title}`);
 
-        const stream = await youtube.download(video.id, {
-            type: 'video+audio',
-            quality: '360p',
-            format: 'mp4'
-        });
+        const stream = await getStream(youtube, video.id);
 
         send(ws, JSON.stringify({ type: 'start', mime: 'video/mp4', title }));
 
