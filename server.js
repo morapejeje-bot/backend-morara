@@ -1,104 +1,54 @@
 const express = require('express');
-const http = require('http');
-const WebSocket = require('ws');
 const { Innertube } = require('youtubei.js');
 
 const app = express();
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+
+// Izinkan web morara.my.id memanggil backend ini
+app.use((req, res, next) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    next();
+});
+
+let ytPromise = null;
+function getYoutube() {
+    if (!ytPromise) {
+        ytPromise = Innertube.create({ generate_session_locally: true }).catch((e) => {
+            ytPromise = null;
+            throw e;
+        });
+    }
+    return ytPromise;
+}
 
 app.get('/', (req, res) => res.send('Server Morara Jalan!'));
 
-let youtubePromise = null;
-function getYoutube() {
-    if (!youtubePromise) {
-        youtubePromise = Innertube.create({
-            generate_session_locally: true
-        }).catch((err) => {
-            youtubePromise = null;
-            throw err;
-        });
-    }
-    return youtubePromise;
-}
-
-function send(ws, data) {
-    if (ws.readyState === WebSocket.OPEN) ws.send(data);
-}
-
-// Coba beberapa client sampai ada yang lolos dari "login required"
-const CLIENTS = ['IOS', 'TV_EMBEDDED', 'ANDROID', 'WEB_EMBEDDED', 'MWEB'];
-
-async function getStream(youtube, id) {
-    let lastErr;
-    for (const client of CLIENTS) {
-        try {
-            console.log(`Coba client: ${client}`);
-            const stream = await youtube.download(id, {
-                type: 'video+audio',
-                quality: '360p',
-                format: 'mp4',
-                client
-            });
-            console.log(`Client berhasil: ${client}`);
-            return stream;
-        } catch (err) {
-            console.log(`Client ${client} gagal: ${err.message}`);
-            lastErr = err;
-        }
-    }
-    throw lastErr;
-}
-
-wss.on('connection', async (ws, req) => {
-    const urlParams = new URLSearchParams(req.url.split('?')[1]);
-    const query = urlParams.get('q');
-
-    let closed = false;
-    ws.on('close', () => { closed = true; });
-
-    if (!query) {
-        send(ws, JSON.stringify({ type: 'error', message: 'Judul kosong!' }));
-        return ws.close();
-    }
+app.get('/search', async (req, res) => {
+    const q = (req.query.q || '').toString().trim();
+    if (!q) return res.status(400).json({ error: 'Judul kosong!' });
 
     try {
-        console.log(`Mencari: ${query}`);
-        const youtube = await getYoutube();
-        const search = await youtube.search(query, { type: 'video' });
+        console.log(`Mencari: ${q}`);
+        const yt = await getYoutube();
+        const search = await yt.search(q, { type: 'video' });
 
-        if (!search.videos || search.videos.length === 0) {
-            throw new Error('Video tidak ditemukan');
-        }
+        const results = (search.videos || [])
+            .filter((v) => v.id)
+            .slice(0, 10)
+            .map((v) => ({
+                id: v.id,
+                title: v.title?.text || String(v.title || q),
+                channel: v.author?.name || 'YouTube',
+                duration: v.duration?.text || '',
+                thumb: `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`
+            }));
 
-        const video = search.videos[0];
-        const title = video.title?.text || String(video.title || query);
-        console.log(`Ketemu: ${title}`);
-
-        const stream = await getStream(youtube, video.id);
-
-        send(ws, JSON.stringify({ type: 'start', mime: 'video/mp4', title }));
-
-        for await (const chunk of stream) {
-            if (closed) break;
-            send(ws, chunk);
-        }
-
-        if (!closed) {
-            send(ws, JSON.stringify({ type: 'end' }));
-            ws.close();
-        }
-        console.log('Selesai mengirim video');
-
-    } catch (error) {
-        console.error(error);
-        send(ws, JSON.stringify({
-            type: 'error',
-            message: 'Gagal: ' + (error.message || 'Error tidak diketahui')
-        }));
-        ws.close();
+        if (!results.length) return res.status(404).json({ error: 'Video tidak ditemukan' });
+        res.json({ results });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message || 'Error tidak diketahui' });
     }
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server jalan di port ${PORT}`));
+app.listen(PORT, () => console.log(`Server jalan di port ${PORT}`));
