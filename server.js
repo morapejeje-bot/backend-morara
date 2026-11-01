@@ -9,61 +9,80 @@ const wss = new WebSocket.Server({ server });
 
 app.get('/', (req, res) => res.send('Server Morara Jalan!'));
 
-// Cookies lo (bisa lo kosongin kalau udah logout)
-const COOKIE_YOUTUBE = "HSID=AG5usqEM8KLaTEFC8; SID=g.a000EQlW6I6jIYPzgoVsg5OkV_tHT0wECMyftXrR37eGbpsuig5FFrJMOVaoESx1poeMWN9ragACgYKAZ4SARISFQHGX2MiaE6AgdQZ2EU6wPKhMoIhexoVAUF8yKqr6vaBptrfN934MiNRlRqW0076; SAPISID=wKM1UUGNYsJ1z7Dr/ApuUC5HmROo0WtON3; APISID=FqcKP6nqzJI2bnC6/Akpkg4dyiKhIqZNxs; SSID=ABN14AIg1KtL5fHzz; VISITOR_INFO1_LIVE=A9HJwAH_icw; PREF=tz=Asia.Kuala_Lumpur&f7=100&f6=40000000";
+// Buat 1 sesi Innertube dan dipakai ulang (lebih cepat & hemat request)
+let youtubePromise = null;
+function getYoutube() {
+    if (!youtubePromise) {
+        youtubePromise = Innertube.create({
+            generate_session_locally: true
+        }).catch((err) => {
+            youtubePromise = null; // reset kalau gagal biar bisa dicoba lagi
+            throw err;
+        });
+    }
+    return youtubePromise;
+}
+
+function send(ws, data) {
+    if (ws.readyState === WebSocket.OPEN) ws.send(data);
+}
 
 wss.on('connection', async (ws, req) => {
     const urlParams = new URLSearchParams(req.url.split('?')[1]);
     const query = urlParams.get('q');
 
+    let closed = false;
+    ws.on('close', () => { closed = true; });
+
     if (!query) {
-        ws.send(JSON.stringify({ type: 'error', message: 'Judul kosong!' }));
+        send(ws, JSON.stringify({ type: 'error', message: 'Judul kosong!' }));
         return ws.close();
     }
 
     try {
-        console.log(`Mencari lagu: ${query}`);
-        
-        // TRIK: Pake client WEB_CREATOR untuk search (lebih stabil dari ANDROID)
-        const youtube = await Innertube.create({
-            client_type: 'WEB_CREATOR', 
-            cookie: COOKIE_YOUTUBE,
-            // Tambahin visitor_data biar dianggap sesi baru yang valid
-            visitor_data: 'CgtoU2VhcmNoR3V5cw%3D%3D' 
-        });
-        
+        console.log(`Mencari: ${query}`);
+
+        const youtube = await getYoutube();
+
         const search = await youtube.search(query, { type: 'video' });
-        
+
         if (!search.videos || search.videos.length === 0) {
             throw new Error('Video tidak ditemukan');
         }
 
         const video = search.videos[0];
-        console.log(`Ketemu: ${video.title.text}`);
+        const title = video.title?.text || String(video.title || query);
+        console.log(`Ketemu: ${title}`);
 
-        // Ambil stream video
         const stream = await youtube.download(video.id, {
-            type: 'audio+video',
-            quality: '360p'
+            type: 'video+audio',
+            quality: '360p',
+            format: 'mp4'
         });
 
-        ws.send(JSON.stringify({ 
-            type: 'start', 
+        send(ws, JSON.stringify({
+            type: 'start',
             mime: 'video/mp4',
-            title: video.title.text 
+            title
         }));
 
         for await (const chunk of stream) {
-            ws.send(chunk);
+            if (closed) break; // user sudah tutup halaman, stop kirim
+            send(ws, chunk);
         }
 
-        ws.send(JSON.stringify({ type: 'end' }));
-        ws.close();
+        if (!closed) {
+            send(ws, JSON.stringify({ type: 'end' }));
+            ws.close();
+        }
         console.log('Selesai mengirim video');
 
     } catch (error) {
         console.error(error);
-        ws.send(JSON.stringify({ type: 'error', message: 'Gagal: ' + (error.message || 'Error tidak diketahui') }));
+        send(ws, JSON.stringify({
+            type: 'error',
+            message: 'Gagal: ' + (error.message || 'Error tidak diketahui')
+        }));
         ws.close();
     }
 });
