@@ -9,14 +9,13 @@ const wss = new WebSocket.Server({ server });
 
 app.get('/', (req, res) => res.send('Server Morara Jalan!'));
 
-// Buat 1 sesi Innertube dan dipakai ulang (lebih cepat & hemat request)
 let youtubePromise = null;
 function getYoutube() {
     if (!youtubePromise) {
         youtubePromise = Innertube.create({
             generate_session_locally: true
         }).catch((err) => {
-            youtubePromise = null; // reset kalau gagal biar bisa dicoba lagi
+            youtubePromise = null;
             throw err;
         });
     }
@@ -41,9 +40,7 @@ wss.on('connection', async (ws, req) => {
 
     try {
         console.log(`Mencari: ${query}`);
-
         const youtube = await getYoutube();
-
         const search = await youtube.search(query, { type: 'video' });
 
         if (!search.videos || search.videos.length === 0) {
@@ -60,14 +57,10 @@ wss.on('connection', async (ws, req) => {
             format: 'mp4'
         });
 
-        send(ws, JSON.stringify({
-            type: 'start',
-            mime: 'video/mp4',
-            title
-        }));
+        send(ws, JSON.stringify({ type: 'start', mime: 'video/mp4', title }));
 
         for await (const chunk of stream) {
-            if (closed) break; // user sudah tutup halaman, stop kirim
+            if (closed) break;
             send(ws, chunk);
         }
 
