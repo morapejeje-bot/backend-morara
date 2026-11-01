@@ -1,7 +1,7 @@
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
-const ytstream = require('yt-stream');
+const { Innertube } = require('youtubei.js');
 
 const app = express();
 const server = http.createServer(app);
@@ -21,40 +21,41 @@ wss.on('connection', async (ws, req) => {
     try {
         console.log(`Mencari lagu: ${query}`);
         
-        // Pake yt-stream buat nyari & ambil video (lebih tahan blokir)
-        const streamInfo = await ytstream.stream(query, {
-            quality: 'low', // resolusi rendah biar downloadnya cepet
-            type: 'video'
-        });
+        // Pake youtubei.js buat nyari & ambil video
+        const youtube = await Innertube.create();
+        const search = await youtube.search(query, { type: 'video' });
+        
+        if (!search.videos || search.videos.length === 0) {
+            throw new Error('Video tidak ditemukan');
+        }
 
-        console.log(`Ketemu video! Mulai streaming...`);
+        const video = search.videos[0];
+        console.log(`Ketemu: ${video.title.text}`);
+
+        // Ambil stream video kualitas 360p (audio + video)
+        const stream = await youtube.download(video.id, {
+            type: 'audio+video',
+            quality: '360p'
+        });
 
         ws.send(JSON.stringify({ 
             type: 'start', 
             mime: 'video/mp4',
-            title: query 
+            title: video.title.text 
         }));
 
         // Kirim potongan video ke web (HTML)
-        streamInfo.stream.on('data', (chunk) => {
+        for await (const chunk of stream) {
             ws.send(chunk);
-        });
+        }
 
-        streamInfo.stream.on('end', () => {
-            ws.send(JSON.stringify({ type: 'end' }));
-            ws.close();
-            console.log('Selesai mengirim video');
-        });
-
-        streamInfo.stream.on('error', (err) => {
-            console.error(err);
-            ws.send(JSON.stringify({ type: 'error', message: err.message }));
-            ws.close();
-        });
+        ws.send(JSON.stringify({ type: 'end' }));
+        ws.close();
+        console.log('Selesai mengirim video');
 
     } catch (error) {
         console.error(error);
-        ws.send(JSON.stringify({ type: 'error', message: 'Gagal: ' + error.message }));
+        ws.send(JSON.stringify({ type: 'error', message: 'Gagal: ' + (error.message || 'Error tidak diketahui') }));
         ws.close();
     }
 });
