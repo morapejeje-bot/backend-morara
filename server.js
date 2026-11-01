@@ -9,7 +9,8 @@ const wss = new WebSocket.Server({ server });
 
 app.get('/', (req, res) => res.send('Server Morara Jalan!'));
 
-// Cookies lo yang udah gw rapihin (buang yang dobel)
+// Masukin cookies baru lo di sini kalau mau tetep pake cookies
+// (Tapi kalau udah logout, biarin aja teks di bawah ini)
 const COOKIE_YOUTUBE = "HSID=AG5usqEM8KLaTEFC8; SID=g.a000EQlW6I6jIYPzgoVsg5OkV_tHT0wECMyftXrR37eGbpsuig5FFrJMOVaoESx1poeMWN9ragACgYKAZ4SARISFQHGX2MiaE6AgdQZ2EU6wPKhMoIhexoVAUF8yKqr6vaBptrfN934MiNRlRqW0076; SAPISID=wKM1UUGNYsJ1z7Dr/ApuUC5HmROo0WtON3; APISID=FqcKP6nqzJI2bnC6/Akpkg4dyiKhIqZNxs; SSID=ABN14AIg1KtL5fHzz; VISITOR_INFO1_LIVE=A9HJwAH_icw; PREF=tz=Asia.Kuala_Lumpur&f7=100&f6=40000000";
 
 wss.on('connection', async (ws, req) => {
@@ -24,9 +25,10 @@ wss.on('connection', async (ws, req) => {
     try {
         console.log(`Mencari lagu: ${query}`);
         
-        // Pake youtubei.js + Cookies
+        // TRIK: Pake client ANDROID biar YouTube ngira ini dari HP asli
         const youtube = await Innertube.create({
-            cookie: COOKIE_YOUTUBE 
+            client_type: 'ANDROID', 
+            cookie: COOKIE_YOUTUBE
         });
         
         const search = await youtube.search(query, { type: 'video' });
