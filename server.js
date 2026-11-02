@@ -1,14 +1,35 @@
 const express = require('express');
 const { Innertube } = require('youtubei.js');
 const axios = require('axios');
+const { router: authRouter } = require('./moraweb-auth');
 
 const app = express();
+app.set('trust proxy', 1); // Render ada di belakang proxy, biar req.ip benar
 
-// Izinkan web morara.my.id memanggil backend ini
+// Izinkan web morara.my.id memanggil backend ini (termasuk preflight untuk POST JSON)
+const ALLOWED_ORIGINS = [
+    'https://morara.my.id',
+    'https://www.morara.my.id',
+    'https://ampremmora.pages.dev'
+];
 app.use((req, res, next) => {
-    res.set('Access-Control-Allow-Origin', '*');
+    const origin = req.get('origin');
+    if (origin && ALLOWED_ORIGINS.includes(origin)) {
+        res.set('Access-Control-Allow-Origin', origin);
+        res.set('Vary', 'Origin');
+    } else {
+        // request tanpa origin / origin lain: tetap boleh baca route publik lama
+        res.set('Access-Control-Allow-Origin', '*');
+    }
+    res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-admin-key');
+    res.set('Access-Control-Max-Age', '86400');
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
 });
+
+// Login Google (/auth/google) dan daftar user admin (/admin/users)
+app.use(authRouter);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
