@@ -57,9 +57,30 @@ app.get('/search', async (req, res) => {
 });
 
 // ==========================================
-// BAGIAN 2: TIKTOK (TikWM API)
+// BAGIAN 2: TIKTOK
+// Jalur utama : RapidAPI (kalau RAPIDAPI_KEY diisi di Render)
+// Jalur cadangan: TikWM gratis (sering 403 dari server)
 // ==========================================
-// Header lengkap untuk meniru browser asli (menghindari 403)
+const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY || '';
+const RAPIDAPI_HOST = process.env.RAPIDAPI_HOST || 'tiktok-scraper7.p.rapidapi.com';
+
+async function rapidGet(path, params) {
+    const response = await axios.get(`https://${RAPIDAPI_HOST}${path}`, {
+        params,
+        headers: {
+            'x-rapidapi-key': RAPIDAPI_KEY,
+            'x-rapidapi-host': RAPIDAPI_HOST
+        },
+        timeout: 30000
+    });
+    const body = response.data;
+    if (!body || body.code !== 0) {
+        throw new Error(body?.msg || 'RapidAPI gagal');
+    }
+    return body.data;
+}
+
+// --- Jalur cadangan: TikWM gratis ---
 const axiosHeaders = {
     'accept': 'application/json, text/javascript, */*; q=0.01',
     'accept-language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -69,11 +90,9 @@ const axiosHeaders = {
     'x-requested-with': 'XMLHttpRequest'
 };
 
-// Kirim POST ke TikWM, ulangi otomatis kalau kena 403/429 (batas 1 request/detik)
 async function tikwmPost(endpoint, params, errMsg) {
     const body = new URLSearchParams(params);
     let lastErr;
-
     for (let i = 0; i < 3; i++) {
         try {
             const response = await axios.post(
@@ -104,20 +123,28 @@ async function tikwmPost(endpoint, params, errMsg) {
     throw lastErr;
 }
 
+// --- Fungsi yang dipakai route ---
 async function tikwm(url) {
+    if (RAPIDAPI_KEY) {
+        return rapidGet('/', { url, hd: 1 });
+    }
     return tikwmPost('/api/', { url, hd: '1' }, 'TikWM gagal');
 }
 
 async function tikwmSearch(keywords, cursor = 0, count = 20) {
+    if (RAPIDAPI_KEY) {
+        return rapidGet('/feed/search', {
+            keywords,
+            region: 'ID',
+            count,
+            cursor,
+            publish_time: 0,
+            sort_type: 0
+        });
+    }
     return tikwmPost(
         '/api/feed/search',
-        {
-            keywords,
-            count: String(count),
-            cursor: String(cursor),
-            web: '1',
-            hd: '1'
-        },
+        { keywords, count: String(count), cursor: String(cursor), web: '1', hd: '1' },
         'Pencarian TikTok gagal'
     );
 }
@@ -158,4 +185,4 @@ app.get('/tt/search', async (req, res) => {
 // JALANKAN SERVER
 // ==========================================
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server jalan di port ${PORT}`));
+app.listen(PORT, () => console.log(`Server jalan di port ${PORT} | RapidAPI: ${RAPIDAPI_KEY ? 'AKTIF' : 'mati (pakai TikWM gratis)'}`));
