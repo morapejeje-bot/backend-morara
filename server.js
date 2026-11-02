@@ -234,6 +234,73 @@ app.get('/tt/search', async (req, res) => {
 });
 
 // ==========================================
+// BAGIAN 3: SPOTIFY (pencarian lagu lewat API resmi Spotify)
+// Perlu env di Render: SPOTIFY_CLIENT_ID dan SPOTIFY_CLIENT_SECRET
+// Pemutaran dilakukan di browser lewat embed resmi Spotify, bukan dari server ini.
+// ==========================================
+const SPOTIFY_ID = process.env.SPOTIFY_CLIENT_ID || '';
+const SPOTIFY_SECRET = process.env.SPOTIFY_CLIENT_SECRET || '';
+let spTok = null, spExp = 0;
+
+async function spotifyToken() {
+    if (spTok && Date.now() < spExp - 60000) return spTok;
+    const r = await axios.post(
+        'https://accounts.spotify.com/api/token',
+        'grant_type=client_credentials',
+        {
+            headers: {
+                Authorization: 'Basic ' + Buffer.from(`${SPOTIFY_ID}:${SPOTIFY_SECRET}`).toString('base64'),
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            timeout: 20000
+        }
+    );
+    spTok = r.data.access_token;
+    spExp = Date.now() + (r.data.expires_in || 3600) * 1000;
+    return spTok;
+}
+
+const msFmt = (ms) => { const s = Math.round((ms || 0) / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+app.get('/spotify/search', async (req, res) => {
+    const q = (req.query.q || '').toString().trim();
+    if (!q) return res.status(400).json({ error: 'Parameter q wajib' });
+    if (!SPOTIFY_ID || !SPOTIFY_SECRET) {
+        return res.status(503).json({ error: 'Pencarian Spotify belum diaktifkan di server. Tempel link Spotify saja.' });
+    }
+    try {
+        console.log(`Mencari Spotify: ${q}`);
+        const results = await cached('sp:' + q.toLowerCase(), async () => {
+            const token = await spotifyToken();
+            const r = await axios.get('https://api.spotify.com/v1/search', {
+                params: { q, type: 'track', limit: 10 },
+                headers: { Authorization: `Bearer ${token}` },
+                timeout: 20000
+            });
+            return ((r.data.tracks && r.data.tracks.items) || [])
+                .filter((t) => t && t.id)
+                .map((t) => ({
+                    id: t.id,
+                    uri: t.uri,
+                    title: t.name,
+                    artist: (t.artists || []).map((a) => a.name).join(', ') || 'Spotify',
+                    album: (t.album && t.album.name) || '',
+                    duration: msFmt(t.duration_ms),
+                    popularity: typeof t.popularity === 'number' ? t.popularity : null,
+                    thumb: (t.album && t.album.images && (t.album.images[1] || t.album.images[0]) || {}).url || ''
+                }));
+        });
+        if (!results.length) return res.status(404).json({ error: 'Lagu tidak ditemukan' });
+        res.json({ results });
+    } catch (err) {
+        console.error('spotify/search:', err.response?.data || err.message);
+        if (err.response?.status === 429) return res.status(429).json({ error: 'Kena batas Spotify, coba lagi sebentar.' });
+        if (err.response?.status === 401 || err.response?.status === 400) spTok = null;
+        res.status(500).json({ error: err.response?.data?.error?.message || err.message });
+    }
+});
+
+// ==========================================
 // JALANKAN SERVER
 // ==========================================
 const PORT = process.env.PORT || 3000;
