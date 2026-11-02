@@ -123,6 +123,36 @@ async function tikwmPost(endpoint, params, errMsg) {
     throw lastErr;
 }
 
+// ==========================================
+// CACHE: simpan hasil sementara supaya kuota RapidAPI hemat
+// ==========================================
+const CACHE_TTL = 45 * 60 * 1000;   // 45 menit (URL video TikTok bisa kedaluwarsa)
+const CACHE_MAX = 300;              // maksimal jumlah hasil yang disimpan
+const cache = new Map();
+const inflight = new Map();
+
+function cacheGet(key) {
+    const e = cache.get(key);
+    if (!e) return null;
+    if (Date.now() > e.exp) { cache.delete(key); return null; }
+    return e.val;
+}
+function cacheSet(key, val) {
+    if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
+    cache.set(key, { val, exp: Date.now() + CACHE_TTL });
+}
+// Kalau sudah ada di cache, pakai itu. Kalau ada permintaan sama yang sedang jalan, tunggu yang itu.
+async function cached(key, fn) {
+    const hit = cacheGet(key);
+    if (hit !== null) { console.log(`Cache hit: ${key}`); return hit; }
+    if (inflight.has(key)) return inflight.get(key);
+    const p = fn()
+        .then((v) => { cacheSet(key, v); return v; })
+        .finally(() => inflight.delete(key));
+    inflight.set(key, p);
+    return p;
+}
+
 // --- Fungsi yang dipakai route ---
 async function tikwm(url) {
     if (RAPIDAPI_KEY) {
@@ -156,7 +186,7 @@ app.get('/tt', async (req, res) => {
 
     try {
         console.log(`Mengambil TT URL: ${url}`);
-        const data = await tikwm(url);
+        const data = await cached('tt:' + String(url).trim(), () => tikwm(url));
         res.json({ data });
     } catch (err) {
         console.error(err);
@@ -173,7 +203,8 @@ app.get('/tt/search', async (req, res) => {
         console.log(`Mencari TT: ${q}`);
         const cursor = +(req.query.cursor || 0);
         const count = +(req.query.count || 20);
-        const data = await tikwmSearch(q, cursor, count);
+        const key = `ts:${q.toLowerCase()}|${cursor}|${count}`;
+        const data = await cached(key, () => tikwmSearch(q, cursor, count));
         res.json({ data });
     } catch (err) {
         console.error(err);
