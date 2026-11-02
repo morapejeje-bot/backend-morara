@@ -57,12 +57,21 @@ app.get('/search', async (req, res) => {
 // ==========================================
 // BAGIAN 2: TIKTOK (TikWM API)
 // ==========================================
+// Header lengkap untuk meniru browser asli (menghindari 403)
+const axiosHeaders = {
+    'accept': 'application/json, text/javascript, */*; q=0.01',
+    'accept-encoding': 'gzip, deflate, br',
+    'accept-language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'x-requested-with': 'XMLHttpRequest'
+};
+
 async function tikwm(url) {
     const body = new URLSearchParams({ url, hd: '1' });
     const response = await axios.post('https://www.tikwm.com/api/', body.toString(), {
         headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            ...axiosHeaders,
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
         },
         timeout: 30000
     });
@@ -73,12 +82,10 @@ async function tikwm(url) {
 }
 
 async function tikwmSearch(keywords, cursor = 0, count = 20) {
-    // PERBAIKAN: URL endpoint yang benar adalah /api/feed/search
+    // Parameter yang benar: keywords, count, cursor
     const response = await axios.get('https://www.tikwm.com/api/feed/search', {
         params: { keywords, count, cursor },
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        },
+        headers: axiosHeaders,
         timeout: 30000
     });
     if (!response.data || response.data.code !== 0) {
