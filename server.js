@@ -10,8 +10,10 @@ app.use((req, res, next) => {
     next();
 });
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 // ==========================================
-// BAGIAN 1: YOUTUBE (Kode Asli)
+// BAGIAN 1: YOUTUBE
 // ==========================================
 let ytPromise = null;
 function getYoutube() {
@@ -60,45 +62,71 @@ app.get('/search', async (req, res) => {
 // Header lengkap untuk meniru browser asli (menghindari 403)
 const axiosHeaders = {
     'accept': 'application/json, text/javascript, */*; q=0.01',
-    'accept-encoding': 'gzip, deflate, br',
     'accept-language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'origin': 'https://www.tikwm.com',
+    'referer': 'https://www.tikwm.com/',
     'x-requested-with': 'XMLHttpRequest'
 };
 
-async function tikwm(url) {
-    const body = new URLSearchParams({ url, hd: '1' });
-    const response = await axios.post('https://www.tikwm.com/api/', body.toString(), {
-        headers: {
-            ...axiosHeaders,
-            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
-        },
-        timeout: 30000
-    });
-    if (!response.data || response.data.code !== 0) {
-        throw new Error(response.data?.msg || 'TikWM gagal');
+// Kirim POST ke TikWM, ulangi otomatis kalau kena 403/429 (batas 1 request/detik)
+async function tikwmPost(endpoint, params, errMsg) {
+    const body = new URLSearchParams(params);
+    let lastErr;
+
+    for (let i = 0; i < 3; i++) {
+        try {
+            const response = await axios.post(
+                `https://www.tikwm.com${endpoint}`,
+                body.toString(),
+                {
+                    headers: {
+                        ...axiosHeaders,
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+                    },
+                    timeout: 30000
+                }
+            );
+            if (!response.data || response.data.code !== 0) {
+                throw new Error(response.data?.msg || errMsg);
+            }
+            return response.data.data;
+        } catch (e) {
+            lastErr = e;
+            const st = e.response?.status;
+            if (st === 403 || st === 429 || /limit/i.test(e.message)) {
+                await sleep(1500 * (i + 1));
+                continue;
+            }
+            throw e;
+        }
     }
-    return response.data.data;
+    throw lastErr;
+}
+
+async function tikwm(url) {
+    return tikwmPost('/api/', { url, hd: '1' }, 'TikWM gagal');
 }
 
 async function tikwmSearch(keywords, cursor = 0, count = 20) {
-    // Parameter yang benar: keywords, count, cursor
-    const response = await axios.get('https://www.tikwm.com/api/feed/search', {
-        params: { keywords, count, cursor },
-        headers: axiosHeaders,
-        timeout: 30000
-    });
-    if (!response.data || response.data.code !== 0) {
-        throw new Error(response.data?.msg || 'Pencarian TikTok gagal');
-    }
-    return response.data.data;
+    return tikwmPost(
+        '/api/feed/search',
+        {
+            keywords,
+            count: String(count),
+            cursor: String(cursor),
+            web: '1',
+            hd: '1'
+        },
+        'Pencarian TikTok gagal'
+    );
 }
 
 // Route TikTok: Ambil detail video dari LINK
 app.get('/tt', async (req, res) => {
     const url = req.query.url;
     if (!url) return res.status(400).json({ error: 'Parameter url wajib' });
-    
+
     try {
         console.log(`Mengambil TT URL: ${url}`);
         const data = await tikwm(url);
