@@ -73,7 +73,8 @@ async function tikwm(url) {
 }
 
 async function tikwmSearch(keywords, cursor = 0, count = 20) {
-    const response = await axios.get('https://www.tikwm.com/api/search', {
+    // PERBAIKAN: URL endpoint yang benar adalah /api/feed/search
+    const response = await axios.get('https://www.tikwm.com/api/feed/search', {
         params: { keywords, count, cursor },
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
